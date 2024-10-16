@@ -14,6 +14,20 @@ origin_base_url = ''
 target_client = httpx.AsyncClient(timeout=None)
 
 
+async def check_target(target) -> list[dict[str, str]]:
+    # 检查target是否存在
+    resp = await target_client.get(f'{target_base_url}/orgs/{target}')
+    assert resp.status_code in [200, 404], f'出了点小问题？{target=}, {resp.status_code=}'
+    target_repos = []
+    if resp.status_code == 404:
+        # 创建org
+        resp = await target_client.post(f'{target_base_url}/orgs/', json={'username': target})
+        assert resp.status_code == 201, f'创建org失败, {resp.status_code=}'
+    else:
+        target_repos = await get_target_org_repos(target)
+    return target_repos
+
+
 async def get_target_org_repos(target):
     repos = []
     url = f'{target_base_url}/orgs/{target}/repos'
