@@ -1,7 +1,6 @@
-import asyncio
-from .main import main
+from automirror.main import main
 
 
-def entry() -> int:
-    asyncio.run(main())
-    return 0
+def entry():
+    import asyncio, sys
+    asyncio.run(main(sys.argv[1:]))
