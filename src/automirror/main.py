@@ -14,6 +14,20 @@ origin_base_url = ''
 target_client = httpx.AsyncClient(timeout=None)
 
 
+async def get_target_org_repos(target):
+    repos = []
+    url = f'{target_base_url}/orgs/{target}/repos'
+    while url:
+        resp = await target_client.get(url)
+        assert resp.status_code == 200, f'获取target_org失败, {resp.status_code=}'
+        repos.extend(resp.json())
+        if 'next' in resp.links:
+            url = resp.links['next'].get('url')
+        else:
+            url = None
+    return repos
+
+
 async def main(argv):
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
