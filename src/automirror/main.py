@@ -118,6 +118,21 @@ async def update_repo(origin, origin_url, target):
         return {'code': 'create-failed', 'name': origin, 'message': resp.text}
 
 
+async def update_mirror(_mirror):
+    assert _mirror.get('type') in ['repo', 'org'], '类型必须为repo或者org'
+    assert _mirror.get('origin'), '镜像源名字不为空'
+    if not _mirror.get('target'):
+        _mirror['target'] = _mirror['origin']
+    # assert _mirror.get('target'), '镜像目标名字不为空'
+    if _mirror['type'] == 'repo':
+        print(f'---更新Repo:{_mirror["origin"]}---')
+        await update_repo(_mirror['origin'], _mirror.get('url'), _mirror['target'])
+        # print(result)
+    elif _mirror['type'] == 'org':
+        print(f'---更新Org:{_mirror["origin"]}---')
+        await update_org(_mirror['origin'], _mirror['target'])
+
+
 async def main(argv):
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
@@ -142,6 +157,11 @@ async def main(argv):
     assert resp.status_code == 200, f'认证不成功, {resp.status_code=}'
 
     assert data.get('mirrors'), '没有配置镜像列表'
+    for mirror in data['mirrors']:
+        try:
+            await update_mirror(mirror)
+        except AssertionError as e:
+            print(f"origin: {mirror.get('origin')} 同步失败，{e=}")
 
 
 if __name__ == '__main__':
