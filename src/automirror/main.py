@@ -12,6 +12,7 @@ config = Path('./config.toml')
 target_base_url = ''
 origin_base_url = ''
 target_client = httpx.AsyncClient(timeout=None)
+origin_client = httpx.AsyncClient(timeout=None)
 
 
 async def check_target(target) -> list[dict[str, str]]:
@@ -40,6 +41,19 @@ async def get_target_org_repos(target):
         else:
             url = None
     return repos
+
+
+async def get_origin_org_repos_iter(origin):
+    url = f'{origin_base_url}/orgs/{origin}/repos'
+    while url:
+        resp = await origin_client.get(url)
+        assert resp.status_code == 200, f'获取源org仓库失败, {resp.status_code=}'
+        for repo in resp.json():
+            yield repo
+        if 'next' in resp.links:
+            url = resp.links['next'].get('url')
+        else:
+            url = None
 
 
 async def main(argv):
