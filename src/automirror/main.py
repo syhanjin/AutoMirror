@@ -93,6 +93,31 @@ async def update_org(origin, target):
     return results
 
 
+async def update_repo(origin, origin_url, target):
+    from urllib.parse import urlparse
+    parsed = urlparse(origin_url)
+    assert bool(parsed.scheme and parsed.netloc), 'repo 的 origin_url 不是合法的 url'
+    target_repos = await check_target(target)
+    target_repo_names = [x['name'] for x in target_repos]
+    if origin in target_repo_names:
+        return {'code': 'exists', 'name': origin}
+    resp = await target_client.post(
+        f'{target_base_url}/repos/migrate/',
+        json={
+            'clone_addr': origin_url,
+            'mirror': True,
+            'repo_name': origin,
+            'repo_owner': target,
+        }
+    )
+    if resp.status_code == 201:
+        print(f"Created - {origin}")
+        return {'code': 'created', 'name': origin}
+    else:
+        print(f"CreateFailed - {origin}: {resp.text}")
+        return {'code': 'create-failed', 'name': origin, 'message': resp.text}
+
+
 async def main(argv):
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
