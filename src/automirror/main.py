@@ -8,7 +8,7 @@ import httpx
 parser = argparse.ArgumentParser()
 parser.add_argument('--config', type=Path, default=Path('./config.toml'), help='同步用配置文件路径')
 
-config = Path('./config.toml')
+config: Path = Path('./config.toml')
 target_base_url = ''
 origin_base_url = ''
 target_client = httpx.AsyncClient(timeout=None)
@@ -137,7 +137,7 @@ async def main(argv):
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
     args = parser.parse_args(argv)
-    config: Path = args.config
+    config = args.config
     # 保证config存在
     if not config.exists():
         raise FileNotFoundError("没有找到配置文件")
