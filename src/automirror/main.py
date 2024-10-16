@@ -56,6 +56,43 @@ async def get_origin_org_repos_iter(origin):
             url = None
 
 
+async def update_org(origin, target):
+    results = []
+    target_repos = await check_target(target)
+    target_repo_names = [x['name'] for x in target_repos]
+    async for repo in get_origin_org_repos_iter(origin):
+        if repo['name'] in target_repo_names:
+            target_repo_names.remove(repo['name'])
+            print(f"Existed - {target}/{repo['name']}")
+            results.append({'code': 'existed', 'name': repo['name']})
+            continue
+        resp = await target_client.post(
+            f'{target_base_url}/repos/migrate/',
+            json={
+                'clone_addr': repo['clone_url'],
+                'mirror': True,
+                'repo_name': repo['name'],
+                'repo_owner': target,
+            }
+        )
+        if resp.status_code == 201:
+            print(f"Created - {target}/{repo['name']}")
+            results.append({'code': 'created', 'name': repo['name']})
+        else:
+            print(f"CreateFailed - {target}/{repo['name']}: {resp.text}")
+            results.append({'code': 'create-failed', 'name': repo['name'], 'message': resp.text})
+    # 删除不存在的repo
+    for repo_name in target_repo_names:
+        resp = await target_client.delete(f'{target_base_url}/repos/{target}/{repo_name}/')
+        if resp.status_code == 204:
+            print(f"Deleted - {target}/{repo_name}")
+            results.append({'code': 'deleted', 'name': repo_name})
+        else:
+            print(f"DeleteFailed - {target}/{repo_name}: {resp.text}")
+            results.append({'code': 'delete-failed', 'name': repo_name, 'message': resp.text})
+    return results
+
+
 async def main(argv):
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
