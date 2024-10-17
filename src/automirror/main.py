@@ -16,6 +16,73 @@ target_client = httpx.AsyncClient(timeout=None)
 origin_client = httpx.AsyncClient(timeout=None)
 
 
+class ResultBase:
+    type = None
+    code = None
+    target = None
+    name = None
+
+    def __init__(self, target, name=None):
+        self.target = target
+        self.name = name
+
+    def __repr__(self):
+        if self.type == 'repo':
+            return f'{self.code} - {self.target}/{self.name}'
+        elif self.type == 'org':
+            return f'{self.code} - {self.target}'
+        return self.code
+
+
+class Success(ResultBase):
+    code = 'Success'
+
+
+class Failed(ResultBase):
+    code = 'Failed'
+    error = None
+
+    def __init__(self, target, name, error):
+        self.error = error
+        super().__init__(target, name)
+
+    def __repr__(self):
+        return super().__repr__() + ' - ' + str(self.error)
+
+
+class RepoExisted(Success):
+    type = 'repo'
+    code = 'Existed'
+
+
+class RepoCreated(Success):
+    type = 'repo'
+    code = 'Created'
+
+
+class RepoCreateFailed(Failed):
+    type = 'repo'
+    code = 'CreateFailed'
+
+
+class RepoDeleted(Success):
+    type = 'repo'
+    code = 'Deleted'
+
+
+class RepoDeleteFailed(Failed):
+    type = 'repo'
+    code = 'DeleteFailed'
+
+
+class OrgCreated(Success):
+    type = 'org'
+    code = 'Created'
+
+    def __init__(self, target):
+        super().__init__(target)
+
+
 async def check_target(target) -> list[dict[str, str]]:
     # 检查target是否存在
     resp = await target_client.get(f'{target_base_url}/orgs/{target}')
@@ -25,6 +92,7 @@ async def check_target(target) -> list[dict[str, str]]:
         # 创建org
         resp = await target_client.post(f'{target_base_url}/orgs/', json={'username': target})
         assert resp.status_code == 201, f'创建org失败, {resp.status_code=}'
+        logging.info(OrgCreated(target))
     else:
         target_repos = await get_target_org_repos(target)
     return target_repos
@@ -58,14 +126,12 @@ async def get_origin_org_repos_iter(origin):
 
 
 async def update_org(origin, target):
-    results = []
     target_repos = await check_target(target)
     target_repo_names = [x['name'] for x in target_repos]
     async for repo in get_origin_org_repos_iter(origin):
         if repo['name'] in target_repo_names:
             target_repo_names.remove(repo['name'])
-            logging.info(f"Existed - {target}/{repo['name']}")
-            results.append({'code': 'existed', 'name': repo['name']})
+            logging.info(RepoExisted(target, repo['name']))
             continue
         resp = await target_client.post(
             f'{target_base_url}/repos/migrate/',
@@ -77,21 +143,16 @@ async def update_org(origin, target):
             }
         )
         if resp.status_code == 201:
-            logging.info(f"Created - {target}/{repo['name']}")
-            results.append({'code': 'created', 'name': repo['name']})
+            logging.info(RepoCreated(target, repo['name']))
         else:
-            logging.error(f"CreateFailed - {target}/{repo['name']}: {resp.text}")
-            results.append({'code': 'create-failed', 'name': repo['name'], 'message': resp.text})
+            logging.error(RepoCreateFailed(target, repo['name'], resp.status_code))
     # 删除不存在的repo
     for repo_name in target_repo_names:
         resp = await target_client.delete(f'{target_base_url}/repos/{target}/{repo_name}/')
         if resp.status_code == 204:
-            logging.info(f"Deleted - {target}/{repo_name}")
-            results.append({'code': 'deleted', 'name': repo_name})
+            logging.info(RepoDeleted(target, repo_name))
         else:
-            logging.error(f"DeleteFailed - {target}/{repo_name}: {resp.text}")
-            results.append({'code': 'delete-failed', 'name': repo_name, 'message': resp.text})
-    return results
+            logging.error(RepoDeleteFailed(target, repo_name, resp.status_code))
 
 
 async def update_repo(origin, origin_url, target):
@@ -112,11 +173,9 @@ async def update_repo(origin, origin_url, target):
         }
     )
     if resp.status_code == 201:
-        logging.info(f"Created - {origin}")
-        return {'code': 'created', 'name': origin}
+        logging.info(RepoCreated(target, origin))
     else:
-        logging.info(f"CreateFailed - {origin}: {resp.text}")
-        return {'code': 'create-failed', 'name': origin, 'message': resp.text}
+        logging.error(RepoCreateFailed(target, origin, resp.status_code))
 
 
 async def update_mirror(_mirror):
