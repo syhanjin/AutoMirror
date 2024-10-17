@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import argparse
+import dataclasses
 import logging
 import tomllib
 from pathlib import Path
@@ -16,6 +17,69 @@ target_client = httpx.AsyncClient(timeout=None)
 origin_client = httpx.AsyncClient(timeout=None)
 
 
+@dataclasses.dataclass
+class Repo:
+    target: str
+    name: str
+
+
+@dataclasses.dataclass
+class Org:
+    target: str
+
+
+@dataclasses.dataclass
+class Success:
+    code = None
+
+    def __post_init__(self):
+        logging.info(self)
+
+
+@dataclasses.dataclass
+class Error:
+    code = None
+    http_status_code: int
+
+    def __post_init__(self):
+        logging.error(self)
+
+
+@dataclasses.dataclass
+class RepoExisted(Success, Repo):
+    code = 'existed'
+
+
+@dataclasses.dataclass
+class RepoCreated(Success, Repo):
+    code = 'create'  # 这里不标识类型就不会在__init__中
+
+
+@dataclasses.dataclass
+class RepoDeleted(Success, Repo):
+    code = 'delete'
+
+
+@dataclasses.dataclass
+class RepoCreateFailed(Error, Repo):
+    code = 'create'
+
+
+@dataclasses.dataclass
+class RepoDeleteFailed(Error, Repo):
+    code = 'delete'
+
+
+@dataclasses.dataclass
+class OrgCreated(Success, Org):
+    code = 'create'
+
+
+@dataclasses.dataclass
+class OrgCreateFailed(Error, Org):
+    code = 'create'
+
+
 async def check_target(target) -> list[dict[str, str]]:
     # 检查target是否存在
     resp = await target_client.get(f'{target_base_url}/orgs/{target}')
@@ -25,6 +89,7 @@ async def check_target(target) -> list[dict[str, str]]:
         # 创建org
         resp = await target_client.post(f'{target_base_url}/orgs/', json={'username': target})
         assert resp.status_code == 201, f'创建org失败, {resp.status_code=}'
+        logging.info(OrgCreated(target))
     else:
         target_repos = await get_target_org_repos(target)
     return target_repos
@@ -64,8 +129,7 @@ async def update_org(origin, target):
     async for repo in get_origin_org_repos_iter(origin):
         if repo['name'] in target_repo_names:
             target_repo_names.remove(repo['name'])
-            logging.info(f"Existed - {target}/{repo['name']}")
-            results.append({'code': 'existed', 'name': repo['name']})
+            logging.info(RepoExisted(target, repo['name']))
             continue
         resp = await target_client.post(
             f'{target_base_url}/repos/migrate/',
@@ -77,20 +141,17 @@ async def update_org(origin, target):
             }
         )
         if resp.status_code == 201:
-            logging.info(f"Created - {target}/{repo['name']}")
-            results.append({'code': 'created', 'name': repo['name']})
+            results.append(RepoCreated(target, repo['name']))
         else:
-            logging.error(f"CreateFailed - {target}/{repo['name']}: {resp.text}")
-            results.append({'code': 'create-failed', 'name': repo['name'], 'message': resp.text})
+            results.append(RepoCreateFailed(target, repo['name'], resp.status_code))
     # 删除不存在的repo
     for repo_name in target_repo_names:
         resp = await target_client.delete(f'{target_base_url}/repos/{target}/{repo_name}/')
         if resp.status_code == 204:
-            logging.info(f"Deleted - {target}/{repo_name}")
-            results.append({'code': 'deleted', 'name': repo_name})
+            results.append(RepoDeleted(target, repo_name))
         else:
-            logging.error(f"DeleteFailed - {target}/{repo_name}: {resp.text}")
-            results.append({'code': 'delete-failed', 'name': repo_name, 'message': resp.text})
+            results.append(RepoDeleteFailed(target, repo_name, resp.status_code))
+
     return results
 
 
@@ -101,7 +162,7 @@ async def update_repo(origin, origin_url, target):
     target_repos = await check_target(target)
     target_repo_names = [x['name'] for x in target_repos]
     if origin in target_repo_names:
-        return {'code': 'exists', 'name': origin}
+        return RepoExisted(target, origin)
     resp = await target_client.post(
         f'{target_base_url}/repos/migrate/',
         json={
@@ -112,11 +173,9 @@ async def update_repo(origin, origin_url, target):
         }
     )
     if resp.status_code == 201:
-        logging.info(f"Created - {origin}")
-        return {'code': 'created', 'name': origin}
+        return RepoCreated(target, origin)
     else:
-        logging.info(f"CreateFailed - {origin}: {resp.text}")
-        return {'code': 'create-failed', 'name': origin, 'message': resp.text}
+        return RepoCreateFailed(target, origin, resp.status_code)
 
 
 async def update_mirror(_mirror):
@@ -135,6 +194,7 @@ async def update_mirror(_mirror):
 
 
 async def main(argv):
+    logging.getLogger('httpx').setLevel(logging.CRITICAL)
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
     args = parser.parse_args(argv)
