@@ -194,6 +194,7 @@ async def update_mirror(_mirror):
 
 
 async def main(argv):
+    logging.getLogger('httpx').setLevel(logging.CRITICAL)
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
     args = parser.parse_args(argv)
