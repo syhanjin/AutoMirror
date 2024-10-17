@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import argparse
+import dataclasses
 import logging
 import tomllib
 from pathlib import Path
@@ -16,71 +17,67 @@ target_client = httpx.AsyncClient(timeout=None)
 origin_client = httpx.AsyncClient(timeout=None)
 
 
-class ResultBase:
-    type = None
+@dataclasses.dataclass
+class Repo:
+    target: str
+    name: str
+
+
+@dataclasses.dataclass
+class Org:
+    target: str
+
+
+@dataclasses.dataclass
+class Success:
     code = None
-    target = None
-    name = None
 
-    def __init__(self, target, name=None):
-        self.target = target
-        self.name = name
-
-    def __repr__(self):
-        if self.type == 'repo':
-            return f'{self.code} - {self.target}/{self.name}'
-        elif self.type == 'org':
-            return f'{self.code} - {self.target}'
-        return self.code
+    def __post_init__(self):
+        logging.info(self)
 
 
-class Success(ResultBase):
-    code = 'Success'
+@dataclasses.dataclass
+class Error:
+    code = None
+    http_status_code: int
+
+    def __post_init__(self):
+        logging.error(self)
 
 
-class Failed(ResultBase):
-    code = 'Failed'
-    error = None
-
-    def __init__(self, target, name, error):
-        self.error = error
-        super().__init__(target, name)
-
-    def __repr__(self):
-        return super().__repr__() + ' - ' + str(self.error)
+@dataclasses.dataclass
+class RepoExisted(Success, Repo):
+    code = 'existed'
 
 
-class RepoExisted(Success):
-    type = 'repo'
-    code = 'Existed'
+@dataclasses.dataclass
+class RepoCreated(Success, Repo):
+    code = 'create'  # 这里不标识类型就不会在__init__中
 
 
-class RepoCreated(Success):
-    type = 'repo'
-    code = 'Created'
+@dataclasses.dataclass
+class RepoDeleted(Success, Repo):
+    code = 'delete'
 
 
-class RepoCreateFailed(Failed):
-    type = 'repo'
-    code = 'CreateFailed'
+@dataclasses.dataclass
+class RepoCreateFailed(Error, Repo):
+    code = 'create'
 
 
-class RepoDeleted(Success):
-    type = 'repo'
-    code = 'Deleted'
+@dataclasses.dataclass
+class RepoDeleteFailed(Error, Repo):
+    code = 'delete'
 
 
-class RepoDeleteFailed(Failed):
-    type = 'repo'
-    code = 'DeleteFailed'
+@dataclasses.dataclass
+class OrgCreated(Success, Org):
+    code = 'create'
 
 
-class OrgCreated(Success):
-    type = 'org'
-    code = 'Created'
-
-    def __init__(self, target):
-        super().__init__(target)
+@dataclasses.dataclass
+class OrgCreateFailed(Error, Org):
+    code = 'create'
 
 
 async def check_target(target) -> list[dict[str, str]]:
@@ -126,6 +123,7 @@ async def get_origin_org_repos_iter(origin):
 
 
 async def update_org(origin, target):
+    results = []
     target_repos = await check_target(target)
     target_repo_names = [x['name'] for x in target_repos]
     async for repo in get_origin_org_repos_iter(origin):
@@ -143,16 +141,18 @@ async def update_org(origin, target):
             }
         )
         if resp.status_code == 201:
-            logging.info(RepoCreated(target, repo['name']))
+            results.append(RepoCreated(target, repo['name']))
         else:
-            logging.error(RepoCreateFailed(target, repo['name'], resp.status_code))
+            results.append(RepoCreateFailed(target, repo['name'], resp.status_code))
     # 删除不存在的repo
     for repo_name in target_repo_names:
         resp = await target_client.delete(f'{target_base_url}/repos/{target}/{repo_name}/')
         if resp.status_code == 204:
-            logging.info(RepoDeleted(target, repo_name))
+            results.append(RepoDeleted(target, repo_name))
         else:
-            logging.error(RepoDeleteFailed(target, repo_name, resp.status_code))
+            results.append(RepoDeleteFailed(target, repo_name, resp.status_code))
+
+    return results
 
 
 async def update_repo(origin, origin_url, target):
@@ -162,7 +162,7 @@ async def update_repo(origin, origin_url, target):
     target_repos = await check_target(target)
     target_repo_names = [x['name'] for x in target_repos]
     if origin in target_repo_names:
-        return {'code': 'exists', 'name': origin}
+        return RepoExisted(target, origin)
     resp = await target_client.post(
         f'{target_base_url}/repos/migrate/',
         json={
@@ -173,9 +173,9 @@ async def update_repo(origin, origin_url, target):
         }
     )
     if resp.status_code == 201:
-        logging.info(RepoCreated(target, origin))
+        return RepoCreated(target, origin)
     else:
-        logging.error(RepoCreateFailed(target, origin, resp.status_code))
+        return RepoCreateFailed(target, origin, resp.status_code)
 
 
 async def update_mirror(_mirror):
