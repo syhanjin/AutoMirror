@@ -6,7 +6,30 @@ from pathlib import Path
 
 import httpx
 
-parser = argparse.ArgumentParser()
+__doc__ = """
+AutoMirror v0.1.0
+
+配置文件格式
+--- config.toml ---
+[config]
+target_base_url = "your_target_base_url" # 镜像站api
+origin_base_url = "your_origin_base_url" # 源站api Github: https://api.github.com
+token = "your_token" # 镜像站api访问的access token
+
+[[mirrors]]
+type = "org" # 源为Org
+origin = "your_origin_org_name" # Org的名称
+# target = "your_target_org_name" # 镜像库同步的Org名称，不传入则默认与origin相同
+
+[[mirrors]]
+type = "repo" # 源为Repo
+origin = "your_origin_repo_name" # 源的名称，镜像过来的库与源库同名
+url = "https://github.com/syhanjin/Countdowner.git" # 源的git地址
+target = "your_target_org_name" # 同步到镜像站后属于的Org
+--- --- ---
+""".strip()
+
+parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter, description=__doc__)
 parser.add_argument('--config', type=Path, default=Path('./config.toml'), help='同步用配置文件路径')
 
 config: Path = Path('./config.toml')
