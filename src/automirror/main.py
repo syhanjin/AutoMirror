@@ -30,7 +30,7 @@ target = "your_target_org_name" # 同步到镜像站后属于的Org
 """.strip()
 
 parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter, description=__doc__)
-parser.add_argument('--config', type=Path, default=Path('./config.toml'), help='同步用配置文件路径')
+parser.add_argument('-c', '--config', type=Path, default=Path('./config.toml'), help='同步用配置文件路径')
 
 config: Path = Path('./config.toml')
 target_base_url = ''
