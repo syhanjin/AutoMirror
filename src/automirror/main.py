@@ -2,6 +2,7 @@
 import argparse
 import logging
 import tomllib
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -15,6 +16,8 @@ origin_base_url = ''
 target_client = httpx.AsyncClient(timeout=None)
 origin_client = httpx.AsyncClient(timeout=None)
 
+
+# TODO: 统一logging风格
 
 async def check_target(target) -> list[dict[str, str]]:
     # 检查target是否存在
@@ -57,84 +60,92 @@ async def get_origin_org_repos_iter(origin):
             url = None
 
 
+async def repo_migrate(clone_addr, repo_name, repo_owner):
+    resp = await target_client.post(
+        f'{target_base_url}/repos/migrate/',
+        json={
+            'clone_addr': clone_addr,
+            'mirror': True,
+            'repo_name': repo_name,
+            'repo_owner': repo_owner,
+        }
+    )
+    if resp.status_code != 201:
+        return logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+    logging.info(f"Created - {repo_owner}/{repo_name}")
+
+
+async def repo_delete(repo_name, repo_owner):
+    resp = await target_client.delete(f'{target_base_url}/repos/{repo_owner}/{repo_name}/')
+    if resp.status_code != 204:
+        return logging.error(f'DeleteFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+    logging.info(f"Deleted - {repo_owner}/{repo_name}")
+
+
 async def update_org(origin, target):
-    results = []
-    target_repos = await check_target(target)
-    target_repo_names = [x['name'] for x in target_repos]
-    async for repo in get_origin_org_repos_iter(origin):
-        if repo['name'] in target_repo_names:
-            target_repo_names.remove(repo['name'])
-            logging.info(f"Existed - {target}/{repo['name']}")
-            results.append({'code': 'existed', 'name': repo['name']})
-            continue
-        resp = await target_client.post(
-            f'{target_base_url}/repos/migrate/',
-            json={
-                'clone_addr': repo['clone_url'],
-                'mirror': True,
-                'repo_name': repo['name'],
-                'repo_owner': target,
-            }
-        )
-        if resp.status_code == 201:
-            logging.info(f"Created - {target}/{repo['name']}")
-            results.append({'code': 'created', 'name': repo['name']})
-        else:
-            logging.error(f"CreateFailed - {target}/{repo['name']}: {resp.text}")
-            results.append({'code': 'create-failed', 'name': repo['name'], 'message': resp.text})
-    # 删除不存在的repo
-    for repo_name in target_repo_names:
-        resp = await target_client.delete(f'{target_base_url}/repos/{target}/{repo_name}/')
-        if resp.status_code == 204:
-            logging.info(f"Deleted - {target}/{repo_name}")
-            results.append({'code': 'deleted', 'name': repo_name})
-        else:
-            logging.error(f"DeleteFailed - {target}/{repo_name}: {resp.text}")
-            results.append({'code': 'delete-failed', 'name': repo_name, 'message': resp.text})
-    return results
+    get_origin_org_repos_exception = None
+    try:
+        target_repos = await check_target(target)
+        target_repo_names = [x['name'] for x in target_repos]
+    except Exception as e:
+        return logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+    async with asyncio.TaskGroup() as tg:
+        try:
+            async for repo in get_origin_org_repos_iter(origin):
+                if repo['name'] in target_repo_names:
+                    target_repo_names.remove(repo['name'])
+                    logging.info(f"Existed - {target}/{repo['name']}")
+                else:
+                    tg.create_task(repo_migrate(repo['clone_url'], repo['name'], target))
+        except Exception as e:
+            get_origin_org_repos_exception = e
+        # 删除不存在的repo
+        for repo_name in target_repo_names:
+            tg.create_task(repo_delete(repo_name, target))
+
+    if get_origin_org_repos_exception:
+        logging.error(f'同步不完全({origin} -> {target})：获取origin_repos时发生错误 {get_origin_org_repos_exception}')
+    else:
+        logging.info(f'同步成功({origin} -> {target})！')
 
 
 async def update_repo(origin, origin_url, target):
     from urllib.parse import urlparse
     parsed = urlparse(origin_url)
-    assert bool(parsed.scheme and parsed.netloc), 'repo 的 origin_url 不是合法的 url'
-    target_repos = await check_target(target)
-    target_repo_names = [x['name'] for x in target_repos]
+    if not bool(parsed.scheme and parsed.netloc):
+        return logging.error(f'同步失败({origin} -> {target})：{origin_url=} 不是合法的url')
+    try:
+        target_repos = await check_target(target)
+        target_repo_names = [x['name'] for x in target_repos]
+    except Exception as e:
+        return logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+    # TODO: 避免获取全部target_repo再进行检查
     if origin in target_repo_names:
-        return {'code': 'exists', 'name': origin}
-    resp = await target_client.post(
-        f'{target_base_url}/repos/migrate/',
-        json={
-            'clone_addr': origin_url,
-            'mirror': True,
-            'repo_name': origin,
-            'repo_owner': target,
-        }
-    )
-    if resp.status_code == 201:
-        logging.info(f"Created - {origin}")
-        return {'code': 'created', 'name': origin}
-    else:
-        logging.info(f"CreateFailed - {origin}: {resp.text}")
-        return {'code': 'create-failed', 'name': origin, 'message': resp.text}
+        return logging.info(f"Existed - {target}/{origin}")
+    await repo_migrate(origin_url, origin, target)
 
 
 async def update_mirror(_mirror):
-    assert _mirror.get('type') in ['repo', 'org'], '类型必须为repo或者org'
-    assert _mirror.get('origin'), '镜像源名字不为空'
+    if not _mirror.get('origin'):
+        # 镜像源名字为空，直接跳过，不警告
+        return
     if not _mirror.get('target'):
         _mirror['target'] = _mirror['origin']
-    # assert _mirror.get('target'), '镜像目标名字不为空'
+    if _mirror.get('type') not in ['repo', 'org']:
+        return logging.error(
+            f'同步失败({_mirror["origin"]} -> {_mirror["target"]})：类型必须为repo或者org，实际为：{_mirror["type"]}')
     if _mirror['type'] == 'repo':
-        logging.info(f'---更新Repo:{_mirror["origin"]}---')
+        logging.info(f'同步Repo({_mirror["origin"]} -> {_mirror["target"]})...')
         await update_repo(_mirror['origin'], _mirror.get('url'), _mirror['target'])
         # print(result)
     elif _mirror['type'] == 'org':
-        logging.info(f'---更新Org:{_mirror["origin"]}---')
+        logging.info(f'同步Org({_mirror["origin"]} -> {_mirror["target"]})...')
         await update_org(_mirror['origin'], _mirror['target'])
 
 
 async def main(argv):
+    # 关闭httpx的输出
+    logging.getLogger("httpx").setLevel(logging.CRITICAL + 1)
     global config, target_base_url, origin_base_url, target_client
     # 解析参数
     args = parser.parse_args(argv)
@@ -158,6 +169,7 @@ async def main(argv):
     assert resp.status_code == 200, f'认证不成功, {resp.status_code=}'
 
     assert data.get('mirrors'), '没有配置镜像列表'
+    # 以上是开始同步前可以检查出的配置问题，使用assert检查，检查不通过则直接终止
     logging.info("开始同步")
     for mirror in data['mirrors']:
         try:
@@ -167,6 +179,6 @@ async def main(argv):
 
 
 if __name__ == '__main__':
-    import sys, asyncio
+    import sys
 
     asyncio.run(main(sys.argv[1:]))
