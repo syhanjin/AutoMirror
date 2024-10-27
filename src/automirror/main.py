@@ -125,24 +125,6 @@ async def update_repo(origin, origin_url, target):
     await repo_migrate(origin_url, origin, target)
 
 
-async def update_mirror(_mirror):
-    if not _mirror.get('origin'):
-        # 镜像源名字为空，直接跳过，不警告
-        return
-    if not _mirror.get('target'):
-        _mirror['target'] = _mirror['origin']
-    if _mirror.get('type') not in ['repo', 'org']:
-        return logging.error(
-            f'同步失败({_mirror["origin"]} -> {_mirror["target"]})：类型必须为repo或者org，实际为：{_mirror["type"]}')
-    if _mirror['type'] == 'repo':
-        logging.info(f'同步Repo({_mirror["origin"]} -> {_mirror["target"]})...')
-        await update_repo(_mirror['origin'], _mirror.get('url'), _mirror['target'])
-        # print(result)
-    elif _mirror['type'] == 'org':
-        logging.info(f'同步Org({_mirror["origin"]} -> {_mirror["target"]})...')
-        await update_org(_mirror['origin'], _mirror['target'])
-
-
 async def main(argv):
     # 关闭httpx的输出
     logging.getLogger("httpx").setLevel(logging.CRITICAL + 1)
@@ -172,10 +154,21 @@ async def main(argv):
     # 以上是开始同步前可以检查出的配置问题，使用assert检查，检查不通过则直接终止
     logging.info("开始同步")
     for mirror in data['mirrors']:
-        try:
-            await update_mirror(mirror)
-        except AssertionError as e:
-            logging.error(f"origin: {mirror.get('origin')} 同步失败，{e=}")
+        if not mirror.get('origin'):
+            # 镜像源名字为空，直接跳过，不警告
+            return
+        if not mirror.get('target'):
+            mirror['target'] = mirror['origin']
+        if mirror.get('type') not in ['repo', 'org']:
+            return logging.error(
+                f'同步失败({mirror["origin"]} -> {mirror["target"]})：类型必须为repo或者org，实际为：{mirror["type"]}')
+        if mirror['type'] == 'repo':
+            logging.info(f'同步Repo({mirror["origin"]} -> {mirror["target"]})...')
+            await update_repo(mirror['origin'], mirror.get('url'), mirror['target'])
+            # print(result)
+        elif mirror['type'] == 'org':
+            logging.info(f'同步Org({mirror["origin"]} -> {mirror["target"]})...')
+            await update_org(mirror['origin'], mirror['target'])
 
 
 if __name__ == '__main__':
