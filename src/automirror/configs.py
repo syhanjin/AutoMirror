@@ -22,7 +22,7 @@ class Mirror:
 
     def __repr__(self):
         if self.origin:
-            return f'{self.type if isinstance(type, MirrorType) else ""}源({self.origin} -> {self.target})'
+            return f'{self.type if isinstance(self.type, MirrorType) else ""}源({self.origin} -> {self.target})'
         else:
             return f'源({self.type=} {self.origin=} {self.target=} {self.url=})'
 
