@@ -71,14 +71,16 @@ async def repo_migrate(clone_addr, repo_name, repo_owner):
         }
     )
     if resp.status_code != 201:
-        return logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
-    logging.info(f"Created - {repo_owner}/{repo_name}")
+        logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+    else:
+        logging.info(f"Created - {repo_owner}/{repo_name}")
 
 
 async def repo_delete(repo_name, repo_owner):
     resp = await target_client.delete(f'{target_base_url}/repos/{repo_owner}/{repo_name}/')
     if resp.status_code != 204:
-        return logging.error(f'DeleteFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+        logging.error(f'DeleteFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+        return
     logging.info(f"Deleted - {repo_owner}/{repo_name}")
 
 
@@ -88,7 +90,8 @@ async def update_org(origin, target):
         target_repos = await check_target(target)
         target_repo_names = [x['name'] for x in target_repos]
     except Exception as e:
-        return logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+        logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+        return
     async with asyncio.TaskGroup() as tg:
         try:
             async for repo in get_origin_org_repos_iter(origin):
@@ -113,16 +116,19 @@ async def update_repo(origin, origin_url, target):
     from urllib.parse import urlparse
     parsed = urlparse(origin_url)
     if not bool(parsed.scheme and parsed.netloc):
-        return logging.error(f'同步失败({origin} -> {target})：{origin_url=} 不是合法的url')
+        logging.error(f'同步失败({origin} -> {target})：{origin_url=} 不是合法的url')
+        return
     try:
         target_repos = await check_target(target)
         target_repo_names = [x['name'] for x in target_repos]
     except Exception as e:
-        return logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+        logging.error(f'同步失败({origin} -> {target})：检查target时发生错误 {e}')
+        return
     # TODO: 避免获取全部target_repo再进行检查
     if origin in target_repo_names:
-        return logging.info(f"Existed - {target}/{origin}")
-    await repo_migrate(origin_url, origin, target)
+        logging.info(f"Existed - {target}/{origin}")
+    else:
+        await repo_migrate(origin_url, origin, target)
 
 
 async def main(argv):
@@ -160,8 +166,9 @@ async def main(argv):
         if not mirror.get('target'):
             mirror['target'] = mirror['origin']
         if mirror.get('type') not in ['repo', 'org']:
-            return logging.error(
+            logging.error(
                 f'同步失败({mirror["origin"]} -> {mirror["target"]})：类型必须为repo或者org，实际为：{mirror["type"]}')
+            return
         if mirror['type'] == 'repo':
             logging.info(f'同步Repo({mirror["origin"]} -> {mirror["target"]})...')
             await update_repo(mirror['origin'], mirror.get('url'), mirror['target'])
