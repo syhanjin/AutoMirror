@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import dataclasses
 import logging
 import token
@@ -56,6 +57,7 @@ class Config:
 
     target_client: AsyncClient
     origin_client: AsyncClient = AsyncClient(timeout=None)
+    semaphore: asyncio.Semaphore
 
     @classmethod
     def load(cls, config_path: Path):
@@ -72,6 +74,9 @@ class Config:
         cls.token = raw_config['config'].get('token')
         assert cls.token, '认证token未配置'
         assert raw_config.get('mirrors'), '没有配置镜像列表'
+        concurrency = raw_config['config'].get('concurrency', 3)
+        assert concurrency >= 1, f'并发数至少为1, {concurrency}'
+        cls.semaphore = asyncio.Semaphore(int(concurrency))
         cls.mirrors = []
         for mirror in raw_config['mirrors']:
             mirror_obj = Mirror(

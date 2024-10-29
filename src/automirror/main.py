@@ -77,19 +77,21 @@ async def get_origin_org_repos_iter(origin):
 
 
 async def repo_migrate(clone_addr, repo_name, repo_owner):
-    resp = await Config.target_client.post(
-        f'{Config.target_base_url}/repos/migrate/',
-        json={
-            'clone_addr': clone_addr,
-            'mirror': True,
-            'repo_name': repo_name,
-            'repo_owner': repo_owner,
-        }
-    )
-    if resp.status_code != 201:
+    # 控制migrate并发数
+    async with Config.semaphore:
+        resp = await Config.target_client.post(
+            f'{Config.target_base_url}/repos/migrate/',
+            json={
+                'clone_addr': clone_addr,
+                'mirror': True,
+                'repo_name': repo_name,
+                'repo_owner': repo_owner,
+            }
+        )
+        if resp.status_code == 201:
+            logging.info(f"Created - {repo_owner}/{repo_name}")
+            return
         logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
-    else:
-        logging.info(f"Created - {repo_owner}/{repo_name}")
 
 
 async def repo_delete(repo_name, repo_owner):
@@ -121,7 +123,7 @@ async def update_org(mirror):
     # 删除不存在的repo
     for repo_name in target_repo_names:
         tg.create_task(repo_delete(repo_name, mirror.target))
-    
+
     if get_origin_org_repos_exception:
         logging.error(f'同步{mirror}不完全：获取origin_repos时发生错误 {get_origin_org_repos_exception}')
     else:
