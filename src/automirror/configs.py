@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import asyncio
 import dataclasses
 import logging
 import token
@@ -56,6 +57,7 @@ class Session:
 
     target_client: AsyncClient
     origin_client: AsyncClient = AsyncClient(timeout=None)
+    semaphore: asyncio.Semaphore
 
     def load_config(self, config_path: Path):
         if not config_path.is_file():
@@ -71,7 +73,7 @@ class Session:
         self.token = raw_config['config'].get('token')
         assert self.token, '认证token未配置'
         assert raw_config.get('mirrors'), '没有配置镜像列表'
-        self.mirrors = []
+        cls.mirrors = []
         for mirror in raw_config['mirrors']:
             mirror_obj = Mirror(
                 type=mirror.get('type'),
