@@ -92,6 +92,10 @@ async def repo_migrate(clone_addr, repo_name, repo_owner):
             logging.info(f"Created - {repo_owner}/{repo_name}")
             return
         logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+    if resp.status_code == 422:
+        # migrate失败，删除库
+        logging.error(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
+        await repo_delete(repo_name, repo_owner)
 
 
 async def repo_delete(repo_name, repo_owner):
