@@ -2,6 +2,7 @@
 import argparse
 import logging
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from automirror.configs import session, MirrorType
 
@@ -115,7 +116,8 @@ async def update_org(mirror):
     get_origin_org_repos_exception = None
     try:
         target_repos = await check_target(mirror.target)
-        target_repo_names = [x['name'] for x in target_repos]
+        target_repos_dict = {x['name']: x for x in target_repos}
+        target_repo_names = list(target_repos_dict.keys())
     except Exception as e:
         logging.error(f'同步{mirror}失败：检查target时发生错误 {e}')
         return
@@ -125,8 +127,15 @@ async def update_org(mirror):
                 if repo['name'] in target_repo_names:
                     target_repo_names.remove(repo['name'])
                     logging.info(f"Existed - {mirror.target}/{repo['name']}")
-                else:
-                    tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
+                    mirror_update = datetime.fromisoformat(target_repos_dict[repo['name']]["mirror_updated"])
+                    if mirror_update < session.earliest_update_time:
+                        # 认为同步失败，删库重来
+                        logging.info(
+                            f"TooOld - {mirror.target}/{repo['name']} - LastUpdate:{mirror_update.isoformat()}")
+                        await repo_delete(repo['name'], mirror.target)
+                    else:
+                        continue
+                tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
         except Exception as e:
             get_origin_org_repos_exception = e
         # 删除不存在的repo
