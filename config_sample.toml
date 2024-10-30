@@ -1,0 +1,36 @@
+# 同步配置文件的例子
+
+[config]
+target_base_url = "https://gitea.osa.moe/api/v1"
+origin_base_url = "https://api.github.com"
+# Access Token 至少开启 write:organization; write:repository; read:user
+token = "your_access_token"
+# 并发数，同时存在的最大migrate任务数
+concurrency = 1
+
+# 是否尝试不使用代理，直接访问源
+try_without_proxy = true
+# 代理列表，代理方式：proxy_url后拼接源链接访问
+proxy_urls = [
+    "https://gh.sorashu.moe/"
+]
+
+# 同步需求列表
+
+# Repo类型范例 同步结果：target/origin
+[[mirrors]]
+type = "repo"
+# 原仓库的名字
+origin = "HITSZ-OpenDS"
+# 目标org的名字，不传入或为空则与origin相同
+target = "xxx"
+# clone链接
+url = "xxx"
+
+# Org类型范例 同步结果：target/xxx
+[[mirrors]]
+type = "org"
+# 源Org名称
+origin = "HITSZ-OpenAuto"
+# 目标org的名字，不传入或为空则与origin相同
+target = "xxx"
