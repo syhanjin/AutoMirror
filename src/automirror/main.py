@@ -123,9 +123,10 @@ async def update_org(mirror):
                     tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
         except Exception as e:
             get_origin_org_repos_exception = e
-        # 删除不存在的repo
-        for repo_name in target_repo_names:
-            tg.create_task(repo_delete(repo_name, mirror.target))
+        if not get_origin_org_repos_exception:
+            # 删除不存在的repo
+            for repo_name in target_repo_names:
+                tg.create_task(repo_delete(repo_name, mirror.target))
     if get_origin_org_repos_exception:
         logging.error(f'同步{mirror}不完全：获取origin_repos时发生错误 {get_origin_org_repos_exception}')
     else:
