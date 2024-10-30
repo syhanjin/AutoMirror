@@ -2,6 +2,7 @@
 import argparse
 import logging
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from automirror.configs import session, MirrorType
 
@@ -78,23 +79,29 @@ async def get_origin_org_repos_iter(origin):
 async def repo_migrate(clone_addr, repo_name, repo_owner):
     # 控制migrate并发数
     async with session.semaphore:
-        resp = await session.target_client.post(
-            f'{session.target_base_url}/repos/migrate/',
-            json={
-                'clone_addr': clone_addr,
-                'mirror': True,
-                'repo_name': repo_name,
-                'repo_owner': repo_owner,
-            }
-        )
-        if resp.status_code == 201:
-            logging.info(f"Created - {repo_owner}/{repo_name}")
-            return
-        logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
-    if resp.status_code == 422:
-        # migrate失败，删除库
-        logging.error(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
-        await repo_delete(repo_name, repo_owner)
+        attempts = 0
+        for proxy_url in session.proxy_urls:
+            attempts += 1
+            if attempts > 1:
+                logging.info(f"Retrying({attempts=}) - {repo_owner}/{repo_name} - {proxy_url=}")
+            resp = await session.target_client.post(
+                f'{session.target_base_url}/repos/migrate/',
+                json={
+                    'clone_addr': proxy_url + clone_addr,
+                    'mirror': True,
+                    'repo_name': repo_name,
+                    'repo_owner': repo_owner,
+                }
+            )
+            if resp.status_code == 201:
+                logging.info(f"Created - {repo_owner}/{repo_name}")
+                return
+            logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+            if resp.status_code != 422:
+                return
+            # migrate失败，删除库
+            logging.info(f'Deleting - {repo_owner}/{repo_name}')
+            await repo_delete(repo_name, repo_owner)
 
 
 async def repo_delete(repo_name, repo_owner):
@@ -109,7 +116,8 @@ async def update_org(mirror):
     get_origin_org_repos_exception = None
     try:
         target_repos = await check_target(mirror.target)
-        target_repo_names = [x['name'] for x in target_repos]
+        target_repos_dict = {x['name']: x for x in target_repos}
+        target_repo_names = list(target_repos_dict.keys())
     except Exception as e:
         logging.error(f'同步{mirror}失败：检查target时发生错误 {e}')
         return
@@ -119,8 +127,15 @@ async def update_org(mirror):
                 if repo['name'] in target_repo_names:
                     target_repo_names.remove(repo['name'])
                     logging.info(f"Existed - {mirror.target}/{repo['name']}")
-                else:
-                    tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
+                    mirror_update = datetime.fromisoformat(target_repos_dict[repo['name']]["mirror_updated"])
+                    if mirror_update < session.earliest_update_time:
+                        # 认为同步失败，删库重来
+                        logging.info(
+                            f"TooOld - {mirror.target}/{repo['name']} - LastUpdate:{mirror_update.isoformat()}")
+                        await repo_delete(repo['name'], mirror.target)
+                    else:
+                        continue
+                tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
         except Exception as e:
             get_origin_org_repos_exception = e
         # 删除不存在的repo
