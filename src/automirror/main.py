@@ -78,23 +78,29 @@ async def get_origin_org_repos_iter(origin):
 async def repo_migrate(clone_addr, repo_name, repo_owner):
     # 控制migrate并发数
     async with session.semaphore:
-        resp = await session.target_client.post(
-            f'{session.target_base_url}/repos/migrate/',
-            json={
-                'clone_addr': clone_addr,
-                'mirror': True,
-                'repo_name': repo_name,
-                'repo_owner': repo_owner,
-            }
-        )
-        if resp.status_code == 201:
-            logging.info(f"Created - {repo_owner}/{repo_name}")
-            return
-        logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
-    if resp.status_code == 422:
-        # migrate失败，删除库
-        logging.error(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
-        await repo_delete(repo_name, repo_owner)
+        attempts = 0
+        for proxy_url in session.proxy_urls:
+            attempts += 1
+            if attempts > 1:
+                logging.info(f"Retrying({attempts=}) - {repo_owner}/{repo_name} - {proxy_url=}")
+            resp = await session.target_client.post(
+                f'{session.target_base_url}/repos/migrate/',
+                json={
+                    'clone_addr': proxy_url + clone_addr,
+                    'mirror': True,
+                    'repo_name': repo_name,
+                    'repo_owner': repo_owner,
+                }
+            )
+            if resp.status_code == 201:
+                logging.info(f"Created - {repo_owner}/{repo_name}")
+                return
+            logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+            if resp.status_code != 422:
+                return
+            # migrate失败，删除库
+            logging.info(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
+            await repo_delete(repo_name, repo_owner)
 
 
 async def repo_delete(repo_name, repo_owner):
