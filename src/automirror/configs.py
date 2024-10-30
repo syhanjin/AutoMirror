@@ -3,6 +3,7 @@ import asyncio
 import dataclasses
 import logging
 import token
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,6 +13,11 @@ from httpx import AsyncClient
 class MirrorType(StrEnum):
     ORG = 'org'
     REPO = 'repo'
+
+
+def check_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return bool(parsed.scheme and parsed.netloc)
 
 
 @dataclasses.dataclass
@@ -41,8 +47,7 @@ class Mirror:
             if not self.url:
                 logging.warning(f'{self}的clone_url为空，将跳过同步')
                 return False
-            parsed = urlparse(self.url)
-            if not bool(parsed.scheme and parsed.netloc):
+            if not check_url(self.url):
                 logging.warning(f'{self}的clone_url不合法，将跳过同步')
                 return False
         return True
@@ -52,6 +57,8 @@ class Session:
     target_base_url: str
     origin_base_url: str
     token: str
+    try_without_proxy: bool = True
+    proxy_urls: list[str] = [""]
 
     mirrors: list[Mirror]
 
@@ -76,6 +83,16 @@ class Session:
         concurrency = raw_config['config'].get('concurrency', 3)
         assert concurrency >= 1, f'并发数至少为1, {concurrency=}'
         self.semaphore = asyncio.Semaphore(concurrency)
+        # 识别代理url
+        proxy_urls = raw_config['config'].get('proxy_urls', None)
+        if proxy_urls:
+            for proxy_url in proxy_urls:
+                if check_url(proxy_url):
+                    self.proxy_urls.append(proxy_url if proxy_url.endswith('/') else proxy_url + '/')
+                else:
+                    logging.warning(f'{proxy_url=}不是合法的url，将忽略')
+        try_without_proxy = raw_config['config'].get('try_without_proxy', True)
+        assert try_without_proxy or self.proxy_urls, f'{try_without_proxy=}，但是没有可用的代理'
         self.mirrors = []
         for mirror in raw_config['mirrors']:
             mirror_obj = Mirror(
