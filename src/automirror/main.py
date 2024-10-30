@@ -113,7 +113,7 @@ async def update_org(mirror):
     except Exception as e:
         logging.error(f'同步{mirror}失败：检查target时发生错误 {e}')
         return
-    with asyncio.TaskGroup() as tg:
+    async with asyncio.TaskGroup() as tg:
         try:
             async for repo in get_origin_org_repos_iter(mirror.origin):
                 if repo['name'] in target_repo_names:
