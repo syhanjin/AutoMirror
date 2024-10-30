@@ -47,7 +47,7 @@ class Mirror:
         return True
 
 
-class Config:
+class Session:
     target_base_url: str
     origin_base_url: str
     token: str
@@ -57,22 +57,21 @@ class Config:
     target_client: AsyncClient
     origin_client: AsyncClient = AsyncClient(timeout=None)
 
-    @classmethod
-    def load(cls, config_path: Path):
+    def load_config(self, config_path: Path):
         if not config_path.is_file():
             raise FileNotFoundError(f"没有找到配置文件 {config_path}")
         with config_path.open('rb') as f:
             import tomllib
             raw_config = tomllib.load(f)
         assert raw_config.get('config'), '配置文件中没有 config 项'
-        cls.target_base_url = raw_config['config'].get('target_base_url')
-        assert cls.target_base_url, 'target_base_url未配置'
-        cls.origin_base_url = raw_config['config'].get('origin_base_url')
-        assert cls.origin_base_url, 'origin_base_url未配置'
-        cls.token = raw_config['config'].get('token')
-        assert cls.token, '认证token未配置'
+        self.target_base_url = raw_config['config'].get('target_base_url')
+        assert self.target_base_url, 'target_base_url未配置'
+        self.origin_base_url = raw_config['config'].get('origin_base_url')
+        assert self.origin_base_url, 'origin_base_url未配置'
+        self.token = raw_config['config'].get('token')
+        assert self.token, '认证token未配置'
         assert raw_config.get('mirrors'), '没有配置镜像列表'
-        cls.mirrors = []
+        self.mirrors = []
         for mirror in raw_config['mirrors']:
             mirror_obj = Mirror(
                 type=mirror.get('type'),
@@ -81,17 +80,19 @@ class Config:
                 url=mirror.get('url')
             )
             if mirror_obj.validate():
-                cls.mirrors.append(mirror_obj)
+                self.mirrors.append(mirror_obj)
 
-    @classmethod
-    async def check_token(cls) -> bool:
+    async def check_token(self) -> bool:
         # f'认证不成功, {resp.status_code=}'
         if not token:
             return False
-        cls.target_client = AsyncClient(timeout=None, headers={
-            'Authorization': f'token {cls.token}'
+        self.target_client = AsyncClient(timeout=None, headers={
+            'Authorization': f'token {self.token}'
         })
-        resp = await cls.target_client.get(f"{cls.target_base_url}/user")
+        resp = await self.target_client.get(f"{self.target_base_url}/user")
         if resp.status_code != 200:
             return False
         return True
+
+
+session = Session()

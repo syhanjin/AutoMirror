@@ -3,6 +3,7 @@ import argparse
 import logging
 import asyncio
 from pathlib import Path
+from automirror.configs import session, MirrorType
 
 __doc__ = """
 AutoMirror v0.1.0
@@ -27,8 +28,6 @@ target = "your_target_org_name" # 同步到镜像站后属于的Org
 --- --- ---
 """.strip()
 
-from automirror.configs import Config, MirrorType
-
 parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter, description=__doc__)
 parser.add_argument('-c', '--config', type=Path, default=Path('./config.toml'), help='同步用配置文件路径')
 
@@ -37,12 +36,12 @@ parser.add_argument('-c', '--config', type=Path, default=Path('./config.toml'), 
 
 async def check_target(target) -> list[dict[str, str]]:
     # 检查target是否存在
-    resp = await Config.target_client.get(f'{Config.target_base_url}/orgs/{target}')
+    resp = await session.target_client.get(f'{session.target_base_url}/orgs/{target}')
     assert resp.status_code in [200, 404], f'出了点小问题？{target=}, {resp.status_code=}'
     target_repos = []
     if resp.status_code == 404:
         # 创建org
-        resp = await Config.target_client.post(f'{Config.target_base_url}/orgs/', json={'username': target})
+        resp = await session.target_client.post(f'{session.target_base_url}/orgs/', json={'username': target})
         assert resp.status_code == 201, f'创建org失败, {resp.status_code=}'
     else:
         target_repos = await get_target_org_repos(target)
@@ -51,9 +50,9 @@ async def check_target(target) -> list[dict[str, str]]:
 
 async def get_target_org_repos(target):
     repos = []
-    url = f'{Config.target_base_url}/orgs/{target}/repos'
+    url = f'{session.target_base_url}/orgs/{target}/repos'
     while url:
-        resp = await Config.target_client.get(url)
+        resp = await session.target_client.get(url)
         assert resp.status_code == 200, f'获取target_org失败, {resp.status_code=}'
         repos.extend(resp.json())
         if 'next' in resp.links:
@@ -64,9 +63,9 @@ async def get_target_org_repos(target):
 
 
 async def get_origin_org_repos_iter(origin):
-    url = f'{Config.origin_base_url}/orgs/{origin}/repos'
+    url = f'{session.origin_base_url}/orgs/{origin}/repos'
     while url:
-        resp = await Config.origin_client.get(url)
+        resp = await session.origin_client.get(url)
         assert resp.status_code == 200, f'获取源org仓库失败, {resp.status_code=}'
         for repo in resp.json():
             yield repo
@@ -77,8 +76,8 @@ async def get_origin_org_repos_iter(origin):
 
 
 async def repo_migrate(clone_addr, repo_name, repo_owner):
-    resp = await Config.target_client.post(
-        f'{Config.target_base_url}/repos/migrate/',
+    resp = await session.target_client.post(
+        f'{session.target_base_url}/repos/migrate/',
         json={
             'clone_addr': clone_addr,
             'mirror': True,
@@ -93,7 +92,7 @@ async def repo_migrate(clone_addr, repo_name, repo_owner):
 
 
 async def repo_delete(repo_name, repo_owner):
-    resp = await Config.target_client.delete(f'{Config.target_base_url}/repos/{repo_owner}/{repo_name}/')
+    resp = await session.target_client.delete(f'{session.target_base_url}/repos/{repo_owner}/{repo_name}/')
     if resp.status_code != 204:
         logging.error(f'DeleteFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
         return
@@ -121,7 +120,6 @@ async def update_org(mirror):
     # 删除不存在的repo
     for repo_name in target_repo_names:
         tg.create_task(repo_delete(repo_name, mirror.target))
-    
     if get_origin_org_repos_exception:
         logging.error(f'同步{mirror}不完全：获取origin_repos时发生错误 {get_origin_org_repos_exception}')
     else:
@@ -148,10 +146,10 @@ async def main(argv):
     logging.getLogger("httpx").setLevel(logging.CRITICAL + 1)
     # 解析参数
     args = parser.parse_args(argv)
-    Config.load(args.config)
-    await Config.check_token()
+    session.load_config(args.config)
+    await session.check_token()
     logging.info("开始同步")
-    for mirror in Config.mirrors:
+    for mirror in session.mirrors:
         logging.info(f"开始同步{mirror}...")
         if mirror.type == MirrorType.REPO:
             await update_repo(mirror)
