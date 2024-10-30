@@ -73,7 +73,10 @@ class Session:
         self.token = raw_config['config'].get('token')
         assert self.token, '认证token未配置'
         assert raw_config.get('mirrors'), '没有配置镜像列表'
-        cls.mirrors = []
+        concurrency = raw_config['config'].get('concurrency', 3)
+        assert concurrency >= 1, f'并发数至少为1, {concurrency=}'
+        self.semaphore = asyncio.Semaphore(concurrency)
+        self.mirrors = []
         for mirror in raw_config['mirrors']:
             mirror_obj = Mirror(
                 type=mirror.get('type'),

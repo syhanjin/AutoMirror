@@ -76,17 +76,18 @@ async def get_origin_org_repos_iter(origin):
 
 
 async def repo_migrate(clone_addr, repo_name, repo_owner):
-    resp = await session.target_client.post(
-        f'{session.target_base_url}/repos/migrate/',
-        json={
-            'clone_addr': clone_addr,
-            'mirror': True,
-            'repo_name': repo_name,
-            'repo_owner': repo_owner,
-        }
-    )
-    if resp.status_code != 201:
-        logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
+    async with session.semaphore:
+        resp = await session.target_client.post(
+            f'{session.target_base_url}/repos/migrate/',
+            json={
+                'clone_addr': clone_addr,
+                'mirror': True,
+                'repo_name': repo_name,
+                'repo_owner': repo_owner,
+            }
+        )
+        if resp.status_code != 201:
+            logging.error(f'CreateFailed - {repo_owner}/{repo_name} - {resp.status_code=}')
     if resp.status_code == 422:
         # migrate失败，删除库
         logging.error(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
