@@ -113,19 +113,19 @@ async def update_org(mirror):
     except Exception as e:
         logging.error(f'同步{mirror}失败：检查target时发生错误 {e}')
         return
-    tg = asyncio.TaskGroup()
-    try:
-        async for repo in get_origin_org_repos_iter(mirror.origin):
-            if repo['name'] in target_repo_names:
-                target_repo_names.remove(repo['name'])
-                logging.info(f"Existed - {mirror.target}/{repo['name']}")
-            else:
-                tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
-    except Exception as e:
-        get_origin_org_repos_exception = e
-    # 删除不存在的repo
-    for repo_name in target_repo_names:
-        tg.create_task(repo_delete(repo_name, mirror.target))
+    with asyncio.TaskGroup() as tg:
+        try:
+            async for repo in get_origin_org_repos_iter(mirror.origin):
+                if repo['name'] in target_repo_names:
+                    target_repo_names.remove(repo['name'])
+                    logging.info(f"Existed - {mirror.target}/{repo['name']}")
+                else:
+                    tg.create_task(repo_migrate(repo['clone_url'], repo['name'], mirror.target))
+        except Exception as e:
+            get_origin_org_repos_exception = e
+        # 删除不存在的repo
+        for repo_name in target_repo_names:
+            tg.create_task(repo_delete(repo_name, mirror.target))
     if get_origin_org_repos_exception:
         logging.error(f'同步{mirror}不完全：获取origin_repos时发生错误 {get_origin_org_repos_exception}')
     else:
