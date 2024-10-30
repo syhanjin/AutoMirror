@@ -100,7 +100,7 @@ async def repo_migrate(clone_addr, repo_name, repo_owner):
             if resp.status_code != 422:
                 return
             # migrate失败，删除库
-            logging.info(f'Deleting - {repo_owner}/{repo_name} - {resp.status_code=}')
+            logging.info(f'Deleting - {repo_owner}/{repo_name}')
             await repo_delete(repo_name, repo_owner)
 
 
