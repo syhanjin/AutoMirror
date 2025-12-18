@@ -1,3 +1,7 @@
-# automirror
+# AutoMirror
 
-Describe your project here.
+Run:
+
+```shell
+python src/main.py
+```

@@ -4,7 +4,7 @@ import logging
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from automirror.configs import session, MirrorType
+from configs import session, MirrorType
 
 __doc__ = """
 AutoMirror v0.1.0
@@ -166,6 +166,7 @@ async def update_repo(mirror):
 async def main(argv):
     # 关闭httpx的输出
     logging.getLogger("httpx").setLevel(logging.CRITICAL + 1)
+    logging.getLogger("root").setLevel(logging.INFO)
     # 解析参数
     args = parser.parse_args(argv)
     session.load_config(args.config)
